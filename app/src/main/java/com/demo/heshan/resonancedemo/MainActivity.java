@@ -12,12 +12,14 @@ import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.ListView;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.google.vr.sdk.audio.GvrAudioEngine;
 import com.google.vr.sdk.base.GvrActivity;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Set;
 
 import static android.content.ContentValues.TAG;
@@ -27,6 +29,11 @@ public class MainActivity extends GvrActivity {
     private BluetoothAdapter bluetoothAdapter;
     private static final int ENABLE_BLUETOOTH_REQUEST = 1;
     private static boolean bluetoothReady = false;
+    private static final String DEVICE_NAME = "heshan-Inspiron-5559";
+    private BluetoothDevice device;
+    private BluetoothServer bluetoothServer;
+
+    private final Handler mHandler = new MessageHandler();
 
     private GvrAudioEngine gvrAudioEngine;
     private volatile int sourceId = GvrAudioEngine.INVALID_ID;
@@ -38,7 +45,9 @@ public class MainActivity extends GvrActivity {
     private Button btnForward;
     private Button btnBackward;
 
-    private ListView lstPaird;
+    private ListView lstPaired;
+
+    private TextView txtMessages;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -52,7 +61,9 @@ public class MainActivity extends GvrActivity {
         btnForward = findViewById(R.id.btn_forward);
         btnBackward = findViewById(R.id.btn_backward);
 
-        lstPaird = findViewById(R.id.lst_paird);
+        lstPaired = findViewById(R.id.lst_paird);
+
+        txtMessages = findViewById(R.id.txt_messages);
 
         // Preload the sound file
         new Thread(
@@ -78,7 +89,7 @@ public class MainActivity extends GvrActivity {
             }
         }
         if (bluetoothReady){
-            updatePairdDevicesList();
+            onBluetoothReady();
         }
 
         // set-up action listeners for buttons
@@ -111,6 +122,12 @@ public class MainActivity extends GvrActivity {
         });
     }
 
+    private synchronized void onBluetoothReady(){
+        updatePairdDevicesList();
+        bluetoothServer = new BluetoothServer(this,mHandler);
+        bluetoothServer.start();
+    }
+
     public synchronized void moveSoundSource(float x, float y, float z){
         if (sourceId != GvrAudioEngine.INVALID_ID) {
             gvrAudioEngine.setSoundObjectPosition(sourceId,x,y,z);
@@ -118,6 +135,11 @@ public class MainActivity extends GvrActivity {
             gvrAudioEngine.update();
         }
 
+    }
+
+    private synchronized void connect(boolean secure){
+        assert device != null && bluetoothServer != null;
+        bluetoothServer.connect(device,secure);
     }
 
     @Override
@@ -139,6 +161,7 @@ public class MainActivity extends GvrActivity {
             if (resultCode == RESULT_OK){
                 Toast.makeText(this,"Bluetooth connection received",Toast.LENGTH_LONG).show();
                 bluetoothReady = true;
+                onBluetoothReady();
             } else {
                 Toast.makeText(this,"Bluetooth connection failed",Toast.LENGTH_LONG).show();
             }
@@ -154,11 +177,15 @@ public class MainActivity extends GvrActivity {
         if (pairedDevices.size() > 0){
             for (BluetoothDevice device:pairedDevices){
                 String deviceName = device.getName();
+                if (deviceName.equals(DEVICE_NAME)){
+                    this.device = device;
+                    System.out.println(Arrays.toString(device.getUuids()));
+                }
                 deviceNames.add(deviceName);
             }
             String[] nameArr = deviceNames.toArray(new String[0]);
             ArrayAdapter<String> adapter = new ArrayAdapter<>(this,android.R.layout.simple_list_item_1,nameArr);
-            lstPaird.setAdapter(adapter);
+            lstPaired.setAdapter(adapter);
         } else {
             Toast.makeText(this,"No bluetooth device has been paired yet",Toast.LENGTH_LONG).show();
         }
@@ -215,8 +242,6 @@ public class MainActivity extends GvrActivity {
             }
         }
     }
-
-    private final Handler mHandler = new MessageHandler();
 
     public Activity getActivity() {
         return this;

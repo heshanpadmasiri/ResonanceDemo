@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.util.Log;
+import android.widget.Toast;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -31,9 +32,9 @@ public class BluetoothServer {
 
     // Unique UUID for this application
     private static final UUID MY_UUID_SECURE =
-            UUID.fromString("fa87c0d0-afac-11de-8a39-0800200c9a66");
+            UUID.fromString("8828c726-277c-415d-9329-102e6eb77376");
     private static final UUID MY_UUID_INSECURE =
-            UUID.fromString("8ce255c0-200a-11e0-ac64-0800200c9a66");
+            UUID.fromString("b38d27c6-deba-4169-94ea-75a3fa21a962");
 
     // Member fields
     private final BluetoothAdapter mAdapter;
@@ -44,6 +45,7 @@ public class BluetoothServer {
     private ConnectedThread mConnectedThread;
     private int mState;
     private int mNewState;
+    private Context context;
 
     // Constants that indicate the current connection state
     static final int STATE_NONE = 0;       // we're doing nothing
@@ -58,6 +60,7 @@ public class BluetoothServer {
      * @param handler A Handler to send messages back to the UI Activity
      */
     public BluetoothServer(Context context, Handler handler) {
+        this.context = context;
         mAdapter = BluetoothAdapter.getDefaultAdapter();
         mState = STATE_NONE;
         mNewState = mState;
@@ -320,8 +323,10 @@ public class BluetoothServer {
                     // This is a blocking call and will only return on a
                     // successful connection or an exception
                     socket = mmServerSocket.accept();
+                    Log.d(TAG,"Connection accepted");
                 } catch (IOException e) {
                     Log.e(TAG, "Socket Type: " + mSocketType + "accept() failed", e);
+
                     break;
                 }
 
@@ -407,6 +412,7 @@ public class BluetoothServer {
                 // This is a blocking call and will only return on a
                 // successful connection or an exception
                 mmSocket.connect();
+                Log.d(TAG,"connected");
             } catch (IOException e) {
                 // Close the socket
                 try {

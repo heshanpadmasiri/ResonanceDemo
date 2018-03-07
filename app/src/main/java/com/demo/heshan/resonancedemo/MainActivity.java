@@ -3,11 +3,13 @@ package com.demo.heshan.resonancedemo;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothSocket;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.Message;
-import android.util.Log;
+import android.speech.tts.TextToSpeech;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -18,22 +20,24 @@ import android.widget.Toast;
 import com.google.vr.sdk.audio.GvrAudioEngine;
 import com.google.vr.sdk.base.GvrActivity;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
 
-import static android.content.ContentValues.TAG;
-
-public class MainActivity extends GvrActivity {
+public class MainActivity extends GvrActivity implements TextToSpeech.OnInitListener{
 
     private BluetoothAdapter bluetoothAdapter;
     private static final int ENABLE_BLUETOOTH_REQUEST = 1;
     private static boolean bluetoothReady = false;
-    private static final String DEVICE_NAME = "heshan-Inspiron-5559";
+    private static final String DEVICE_NAME = "HC-06";
     private BluetoothDevice device;
     private BluetoothServer bluetoothServer;
 
-    private final Handler mHandler = new MessageHandler();
+    private Handler mHandler;
 
     private GvrAudioEngine gvrAudioEngine;
     private volatile int sourceId = GvrAudioEngine.INVALID_ID;
@@ -44,10 +48,53 @@ public class MainActivity extends GvrActivity {
     private Button btnLeft;
     private Button btnForward;
     private Button btnBackward;
+    private Button btnSpeak;
 
     private ListView lstPaired;
 
-    private TextView txtMessages;
+    private TextView txtHeadbandReadings;
+    private TextView txtHeadbandBattery;
+    private TextView txtStickDistance;
+    private TextView txtStickBattery;
+
+    private TextToSpeech textToSpeech;
+
+    private long[] headbandDistances;
+    private long stickDistance;
+    private long headbandBattery;
+    private long stickBattery;
+
+    public long[] getHeadbandDistances() {
+        return headbandDistances;
+    }
+
+    public void setHeadbandDistances(long[] headbandDistances) {
+        this.headbandDistances = headbandDistances;
+    }
+
+    public long getStickDistance() {
+        return stickDistance;
+    }
+
+    public void setStickDistance(long stickDistance) {
+        this.stickDistance = stickDistance;
+    }
+
+    public long getHeadbandBattery() {
+        return headbandBattery;
+    }
+
+    public void setHeadbandBattery(long headbandBattery) {
+        this.headbandBattery = headbandBattery;
+    }
+
+    public long getStickBattery() {
+        return stickBattery;
+    }
+
+    public void setStickBattery(long stickBattery) {
+        this.stickBattery = stickBattery;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -56,15 +103,27 @@ public class MainActivity extends GvrActivity {
         gvrAudioEngine = new GvrAudioEngine(this,GvrAudioEngine.RenderingMode.BINAURAL_HIGH_QUALITY);
         gvrAudioEngine.setHeadPosition(0,0,0);
 
+        textToSpeech = new TextToSpeech(this,this);
+
         btnRight = findViewById(R.id.btn_right);
         btnLeft = findViewById(R.id.btn_left);
         btnForward = findViewById(R.id.btn_forward);
         btnBackward = findViewById(R.id.btn_backward);
 
+        btnSpeak = findViewById(R.id.btn_speak);
+        btnSpeak.setEnabled(false);
+
         lstPaired = findViewById(R.id.lst_paird);
 
-        txtMessages = findViewById(R.id.txt_messages);
+        txtHeadbandReadings = findViewById(R.id.txt_headbandreadings);
+        txtHeadbandBattery = findViewById(R.id.txt_headband_battery);
+        txtStickBattery = findViewById(R.id.txt_stick_battery);
+        txtStickDistance = findViewById(R.id.txt_stick_distance);
 
+        headbandDistances = new long[8];
+        headbandBattery = 0;
+        stickDistance = 0;
+        stickBattery = 0;
         // Preload the sound file
         new Thread(
                 new Runnable() {
@@ -120,12 +179,49 @@ public class MainActivity extends GvrActivity {
                 moveSoundSource(0,-10,0);
             }
         });
+
+        btnSpeak.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                String text = "Ha ha ha";
+                textToSpeech.speak(text,TextToSpeech.QUEUE_FLUSH,null);
+            }
+        });
     }
 
     private synchronized void onBluetoothReady(){
         updatePairdDevicesList();
-        bluetoothServer = new BluetoothServer(this,mHandler);
-        bluetoothServer.start();
+        mHandler = new Handler(Looper.getMainLooper()){
+            @Override
+            public void handleMessage(Message msg) {
+                switch (msg.what){
+                    case BluetoothMessage.HEADBAND_DISTANCE:
+                        getHeadbandDistances()[msg.arg1] = msg.arg2;
+                        txtHeadbandReadings.setText(Arrays.toString(getHeadbandDistances()));
+                        break;
+                    case BluetoothMessage.HEADBAND_BATTERY:
+                        setHeadbandBattery(msg.arg1);
+                        txtHeadbandBattery.setText(Long.toString(getHeadbandBattery()));
+                        break;
+                    case BluetoothMessage.STICK_BATTERY:
+                        setStickBattery(msg.arg1);
+                        txtStickBattery.setText(Long.toString(getStickBattery()));
+                        break;
+                    case BluetoothMessage.STICK_DISTANCE:
+                        setStickDistance(msg.arg1);
+                        txtStickDistance.setText(Long.toString(getStickDistance()));
+                        break;
+                    default:
+                        super.handleMessage(msg);
+                }
+            }
+        };
+        // Make sure the devices have been paired before
+        if (device != null){
+            ReadThread readThread = new ReadThread(device,mHandler);
+            readThread.start();
+        }
+
     }
 
     public synchronized void moveSoundSource(float x, float y, float z){
@@ -179,7 +275,6 @@ public class MainActivity extends GvrActivity {
                 String deviceName = device.getName();
                 if (deviceName.equals(DEVICE_NAME)){
                     this.device = device;
-                    System.out.println(Arrays.toString(device.getUuids()));
                 }
                 deviceNames.add(deviceName);
             }
@@ -191,59 +286,91 @@ public class MainActivity extends GvrActivity {
         }
     }
 
-    /**
-     * The Handler that gets information back from the BluetoothChatService
-     */
+    @Override
+    protected void onDestroy() {
+        if (textToSpeech != null){
+            textToSpeech.stop();
+            textToSpeech.shutdown();
+        }
+        super.onDestroy();
+    }
 
-    private class MessageHandler extends Handler{
-        public void handleMessage(Message msg) {
-            Activity activity = getActivity();
-            switch (msg.what) {
-                case Constants.MESSAGE_STATE_CHANGE:
-                    switch (msg.arg1) {
-                        case BluetoothServer.STATE_CONNECTED:
-                            Log.d(TAG,"bluetooth server connected");
-                            break;
-                        case BluetoothServer.STATE_CONNECTING:
-                            Log.d(TAG,"bluetooth server connecting");
-                            break;
-                        case BluetoothServer.STATE_LISTEN:
-                        case BluetoothServer.STATE_NONE:
-                            Log.d(TAG,"bluetooth server state NONE");
-                            break;
-                    }
-                    break;
-                case Constants.MESSAGE_WRITE:
-                    byte[] writeBuf = (byte[]) msg.obj;
-                    // construct a string from the buffer
-                    String writeMessage = new String(writeBuf);
-                    Log.d(TAG,"message" + writeMessage + "written");
-                    break;
-                case Constants.MESSAGE_READ:
-                    byte[] readBuf = (byte[]) msg.obj;
-                    // construct a string from the valid bytes in the buffer
-                    String readMessage = new String(readBuf, 0, msg.arg1);
-                    Log.d(TAG,"message" + readMessage + "received");
-                    break;
-                case Constants.MESSAGE_DEVICE_NAME:
-                    // save the connected device's name
-                    String deviceName = msg.getData().getString(Constants.DEVICE_NAME);
-                    if (null != activity) {
-                        Toast.makeText(activity, "Connected to "
-                                + deviceName, Toast.LENGTH_SHORT).show();
-                    }
-                    break;
-                case Constants.MESSAGE_TOAST:
-                    if (null != activity) {
-                        Toast.makeText(activity, msg.getData().getString(Constants.TOAST),
-                                Toast.LENGTH_SHORT).show();
-                    }
-                    break;
+    @Override
+    public void onInit(int status) {
+        if (status == TextToSpeech.SUCCESS){
+            int result = textToSpeech.setLanguage(Locale.US);
+            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED){
+                Toast.makeText(this,"TTS not availble",Toast.LENGTH_LONG).show();
+            } else {
+                btnSpeak.setEnabled(true);
+                Toast.makeText(this,"TTS ready",Toast.LENGTH_LONG).show();
             }
         }
     }
 
     public Activity getActivity() {
         return this;
+    }
+
+    private class ReadThread extends Thread{
+        BluetoothDevice device;
+        InputStream inputStream;
+        BluetoothSocket socket;
+        Activity activity;
+        Handler handler;
+
+        public ReadThread(BluetoothDevice device, Handler handler) {
+            this.handler = handler;
+            this.device = device;
+            try {
+                socket = device.createInsecureRfcommSocketToServiceRecord(UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"));
+                if (socket != null){
+                    socket.connect();
+                    inputStream = socket.getInputStream();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        @Override
+        public void run() {
+            if (inputStream != null){
+                byte[] header = new byte[3];
+                byte[] data = new byte[2];
+                while (true){
+                    try {
+                        int t1 = inputStream.read(header,0,3);
+                        if (header[0] == 'H'){
+                            // headband message
+                            if (header[2] == 'B'){
+                                // headband battery message
+                                int t2 = inputStream.read(data,0,1);
+                                handler.obtainMessage(BluetoothMessage.HEADBAND_BATTERY,data[0]).sendToTarget();
+                            } else {
+                                // headband distance message
+                                int t2 = inputStream.read(data,0,2);
+                                int distance = ((data[0] & 0xff) << 8) | (data[1] & 0xff);
+                                handler.obtainMessage(BluetoothMessage.HEADBAND_DISTANCE,header[2],distance).sendToTarget();
+                            }
+                        } else {
+                            // stick message
+                            if (header[2] == 'B'){
+                                //stick battery message
+                                int t2 = inputStream.read(data,0,1);
+                                handler.obtainMessage(BluetoothMessage.STICK_BATTERY,data[0]).sendToTarget();
+                            } else {
+                                int t2 = inputStream.read(data,0,2);
+                                int distance = ((data[0] & 0xff) << 8) | (data[1] & 0xff);
+                                handler.obtainMessage(BluetoothMessage.STICK_DISTANCE,distance).sendToTarget();
+                            }
+                        }
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        break;
+                    }
+                }
+            }
+        }
     }
 }

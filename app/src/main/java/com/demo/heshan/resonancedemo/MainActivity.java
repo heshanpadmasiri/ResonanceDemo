@@ -47,11 +47,9 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
     private static boolean bluetoothReady = false;
     private static final String DEVICE_NAME = "HC-05";
     private BluetoothDevice device;
-    volatile int temp;
     private Handler mHandler;
 
     private GvrAudioEngine gvrAudioEngine;
-    private volatile int[] sourceIds;
     private static final String SUCCESS_SOUND_FILE = "success.wav";
 
     /**
@@ -122,9 +120,6 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
         setContentView(R.layout.activity_main);
         gvrAudioEngine = new GvrAudioEngine(this, GvrAudioEngine.RenderingMode.BINAURAL_HIGH_QUALITY);
         gvrAudioEngine.setHeadPosition(0, 0, 0);
-        sourceIds = new int[5];
-        Arrays.fill(sourceIds,GvrAudioEngine.INVALID_ID);
-        textToSpeech = new TextToSpeech(this, this);
 
         headbandDistances = new byte[5];
 
@@ -153,11 +148,6 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
                     @Override
                     public void run() {
                         gvrAudioEngine.preloadSoundFile(SUCCESS_SOUND_FILE);
-                        for (int i = 0 ; i < sourceIds.length; i++){
-                            sourceIds[i] = gvrAudioEngine.createSoundObject(SUCCESS_SOUND_FILE);
-                        }
-
-
                     }
                 }
         ).start();
@@ -326,7 +316,6 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
     }
 
     public synchronized void moveSoundSource(int id,float x, float y, float z){
-
         int sourceId = gvrAudioEngine.createSoundObject(SUCCESS_SOUND_FILE);
         gvrAudioEngine.setSoundObjectPosition(sourceId,x,y,z);
         gvrAudioEngine.playSound(sourceId,false);

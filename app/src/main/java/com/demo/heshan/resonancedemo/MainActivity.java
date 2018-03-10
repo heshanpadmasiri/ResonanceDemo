@@ -41,12 +41,13 @@ import java.util.UUID;
 
 public class MainActivity extends GvrActivity implements TextToSpeech.OnInitListener {
 
+    private static final int MIN_LENGTH = 0;
     private BluetoothAdapter bluetoothAdapter;
 
     private static boolean bluetoothReady = false;
-    private static final String DEVICE_NAME = "HC-06";
+    private static final String DEVICE_NAME = "HC-05";
     private BluetoothDevice device;
-
+    volatile int temp;
     private Handler mHandler;
 
     private GvrAudioEngine gvrAudioEngine;
@@ -67,8 +68,8 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
 
     private TextToSpeech textToSpeech;
 
-    private static double[] angles = {0,20,30,40,50};
-    private static final double MAX_LENGTH = 9999;
+    private static double[] angles = {135,180,270,0,45};
+    private static final double MAX_LENGTH = 100;
     private byte[] headbandDistances;
     private long stickDistance;
     private long headbandBattery;
@@ -153,8 +154,10 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
                     public void run() {
                         gvrAudioEngine.preloadSoundFile(SUCCESS_SOUND_FILE);
                         for (int i = 0 ; i < sourceIds.length; i++){
-                            sourceIds[i] = gvrAudioEngine.createSoundfield(SUCCESS_SOUND_FILE);
+                            sourceIds[i] = gvrAudioEngine.createSoundObject(SUCCESS_SOUND_FILE);
                         }
+
+
                     }
                 }
         ).start();
@@ -312,23 +315,22 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
 
     }
 
-    private void updateSoundPositions() {
+    private synchronized void updateSoundPositions() {
         for (int i = 0; i < 5; i++){
-            if (headbandDistances[i] > MAX_LENGTH){
+            if ((headbandDistances[i] >= MAX_LENGTH ) || (headbandDistances[i] <= MIN_LENGTH)){
                 continue;
             }
-            float[] cordinates = polarToCartesian(headbandDistances[i],angles[i]);
-            moveSoundSource(i,cordinates[0],cordinates[1],cordinates[3]);
+            float[] coordinates = polarToCartesian(headbandDistances[i],angles[i]);
+            moveSoundSource(i,coordinates[0],coordinates[1],coordinates[3]);
         }
     }
 
     public synchronized void moveSoundSource(int id,float x, float y, float z){
-        if (sourceIds[id] != GvrAudioEngine.INVALID_ID) {
-            gvrAudioEngine.setSoundObjectPosition(sourceIds[id],x,y,z);
-            gvrAudioEngine.playSound(sourceIds[id],false);
-            gvrAudioEngine.update();
-        }
 
+        int sourceId = gvrAudioEngine.createSoundObject(SUCCESS_SOUND_FILE);
+        gvrAudioEngine.setSoundObjectPosition(sourceId,x,y,z);
+        gvrAudioEngine.playSound(sourceId,false);
+        gvrAudioEngine.update();
     }
 
     @Override
@@ -447,35 +449,40 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
         @Override
         public void run() {
             if (inputStream != null){
-                byte[] header = new byte[3];
+                byte[] header = new byte[1];
                 byte[] data = new byte[2];
                 while (true){
                     try {
-                        int t1 = inputStream.read(header,0,3);
-                        if (header[0] == 'H'){
-                            // headband message
-                            if (header[2] == 'B'){
-                                // headband battery message
-                                int t2 = inputStream.read(data,0,1);
-                                handler.obtainMessage(BluetoothMessage.HEADBAND_BATTERY,data[0]).sendToTarget();
-                            } else {
-                                // headband distance message
-                                byte[] distances = new byte[5];
-                                int t2 = inputStream.read(distances,0,5);
-                                Message.obtain(handler,BluetoothMessage.HEADBAND_DISTANCE,distances).sendToTarget();
-                            }
-                        } else {
-                            // stick message
-                            if (header[2] == 'B'){
-                                //stick battery message
-                                int t2 = inputStream.read(data,0,1);
-                                handler.obtainMessage(BluetoothMessage.STICK_BATTERY,data[0]).sendToTarget();
-                            } else {
-                                int t2 = inputStream.read(data,0,2);
-                                int distance = ((data[0] & 0xff) << 8) | (data[1] & 0xff);
-                                handler.obtainMessage(BluetoothMessage.STICK_DISTANCE,distance).sendToTarget();
-                            }
+                        int t1 = inputStream.read(header,0,1);
+                        if (header[0] == 'H') {
+                            byte[] distances = new byte[5];
+                            int temp = inputStream.read(distances,0,5);
+                            Message.obtain(handler,BluetoothMessage.HEADBAND_DISTANCE,distances).sendToTarget();
                         }
+//                        if (header[0] == 'H'){
+//                            // headband message
+//                            if (header[2] == 'B'){
+//                                // headband battery message
+//                                int t2 = inputStream.read(data,0,1);
+//                                handler.obtainMessage(BluetoothMessage.HEADBAND_BATTERY,data[0]).sendToTarget();
+//                            } else {
+//                                // headband distance message
+//                                byte[] distances = new byte[5];
+//                                int t2 = inputStream.read(distances,0,5);
+//                                Message.obtain(handler,BluetoothMessage.HEADBAND_DISTANCE,distances).sendToTarget();
+//                            }
+//                        } else {
+//                            // stick message
+//                            if (header[2] == 'B'){
+//                                //stick battery message
+//                                int t2 = inputStream.read(data,0,1);
+//                                handler.obtainMessage(BluetoothMessage.STICK_BATTERY,data[0]).sendToTarget();
+//                            } else {
+//                                int t2 = inputStream.read(data,0,2);
+//                                int distance = ((data[0] & 0xff) << 8) | (data[1] & 0xff);
+//                                handler.obtainMessage(BluetoothMessage.STICK_DISTANCE,distance).sendToTarget();
+//                            }
+//                        }
                     } catch (IOException e) {
                         e.printStackTrace();
                         break;

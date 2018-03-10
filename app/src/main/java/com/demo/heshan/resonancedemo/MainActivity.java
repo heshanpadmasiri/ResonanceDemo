@@ -41,7 +41,7 @@ import java.util.UUID;
 
 public class MainActivity extends GvrActivity implements TextToSpeech.OnInitListener {
 
-    private static final int MIN_LENGTH = 0;
+    private static final int MIN_LENGTH = 10;
     private BluetoothAdapter bluetoothAdapter;
 
     private static boolean bluetoothReady = false;
@@ -67,7 +67,7 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
     private TextToSpeech textToSpeech;
 
     private static double[] angles = {135,180,270,0,45};
-    private static final double MAX_LENGTH = 100;
+    private static final double MAX_LENGTH = 90;
     private byte[] headbandDistances;
     private long stickDistance;
     private long headbandBattery;
@@ -122,6 +122,31 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
         gvrAudioEngine.setHeadPosition(0, 0, 0);
 
         headbandDistances = new byte[5];
+        textToSpeech = new TextToSpeech(this, this);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
         Button btnRight = findViewById(R.id.btn_right);
         Button btnLeft = findViewById(R.id.btn_left);
@@ -273,6 +298,10 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
                 switch (msg.what){
                     case BluetoothMessage.HEADBAND_DISTANCE:
                         byte[] temp =(byte[]) msg.obj;
+                        for (int i =0 ; i < temp.length; i++){
+                            temp[i] = (byte) ((temp[i] - 48) * 10);
+                        }
+                        System.out.println("Calculated :" + Arrays.toString(temp));
                         headbandDistances = temp;
                         updateSoundPositions();
                         txtHeadbandReadings.setText(Arrays.toString(temp));
@@ -291,6 +320,35 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
                         setStickDistance(msg.arg1);
                         txtStickDistance.setText(Long.toString(getStickDistance()));
                         speak(stickDistance + " meters away");
+                        break;
+                    case BluetoothMessage.IR_READING:
+                        System.out.println("IR message: " + (int) msg.obj);
+                        switch ((int) msg.obj){
+                            case 1:
+                                speak("Pedestrian Crossing Red");
+                                break;
+                            case 2:
+                                speak("Pedestrian Crossing Green");
+                                break;
+                            case 3 :
+                                speak("177 Bus");
+                                break;
+                            case 4:
+                                speak("Pedestrian Crossing ahead");
+                                break;
+                            case 5:
+                                speak("Railway station ahead");
+                                break;
+                            case 6:
+                                speak("Bus stand ahead");
+                                break;
+                            case 7:
+                                speak("Danger! pavement under construction");
+                                break;
+                            case 8:
+                                speak("Hospital ahead");
+                                break;
+                        }
                         break;
                     default:
                         super.handleMessage(msg);
@@ -311,7 +369,7 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
                 continue;
             }
             float[] coordinates = polarToCartesian(headbandDistances[i],angles[i]);
-            moveSoundSource(i,coordinates[0],coordinates[1],coordinates[3]);
+            moveSoundSource(i,coordinates[0],coordinates[1],coordinates[2]);
         }
     }
 
@@ -446,32 +504,14 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
                         if (header[0] == 'H') {
                             byte[] distances = new byte[5];
                             int temp = inputStream.read(distances,0,5);
+                            System.out.println(Arrays.toString(distances));
                             Message.obtain(handler,BluetoothMessage.HEADBAND_DISTANCE,distances).sendToTarget();
+                        } else if (header[0] == 'S'){
+                            byte[] reading = new byte[1];
+                            int temp = inputStream.read(reading,0,1);
+                            int irReading = reading[0]-48;
+                            Message.obtain(handler,BluetoothMessage.IR_READING,irReading).sendToTarget();
                         }
-//                        if (header[0] == 'H'){
-//                            // headband message
-//                            if (header[2] == 'B'){
-//                                // headband battery message
-//                                int t2 = inputStream.read(data,0,1);
-//                                handler.obtainMessage(BluetoothMessage.HEADBAND_BATTERY,data[0]).sendToTarget();
-//                            } else {
-//                                // headband distance message
-//                                byte[] distances = new byte[5];
-//                                int t2 = inputStream.read(distances,0,5);
-//                                Message.obtain(handler,BluetoothMessage.HEADBAND_DISTANCE,distances).sendToTarget();
-//                            }
-//                        } else {
-//                            // stick message
-//                            if (header[2] == 'B'){
-//                                //stick battery message
-//                                int t2 = inputStream.read(data,0,1);
-//                                handler.obtainMessage(BluetoothMessage.STICK_BATTERY,data[0]).sendToTarget();
-//                            } else {
-//                                int t2 = inputStream.read(data,0,2);
-//                                int distance = ((data[0] & 0xff) << 8) | (data[1] & 0xff);
-//                                handler.obtainMessage(BluetoothMessage.STICK_DISTANCE,distance).sendToTarget();
-//                            }
-//                        }
                     } catch (IOException e) {
                         e.printStackTrace();
                         break;

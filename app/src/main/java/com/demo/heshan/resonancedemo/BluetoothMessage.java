@@ -9,4 +9,5 @@ public interface BluetoothMessage {
     int HEADBAND_BATTERY = 1;
     int STICK_DISTANCE = 2;
     int STICK_BATTERY = 3;
+    int IR_READING = 4;
 }

@@ -46,6 +46,12 @@
             android:layout_height="wrap_content"
             android:text="Speak" />
 
+        <Button
+            android:id="@+id/btn_sms"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="SMS" />
+
         <TextView
             android:id="@+id/lbl_paired"
             android:layout_width="match_parent"

@@ -1,15 +1,22 @@
 package com.demo.heshan.resonancedemo;
 
+import android.Manifest;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.location.Location;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.speech.tts.TextToSpeech;
+import android.support.annotation.NonNull;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
+import android.telephony.SmsManager;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -17,25 +24,27 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.vr.sdk.audio.GvrAudioEngine;
 import com.google.vr.sdk.base.GvrActivity;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
-public class MainActivity extends GvrActivity implements TextToSpeech.OnInitListener{
+public class MainActivity extends GvrActivity implements TextToSpeech.OnInitListener {
 
     private BluetoothAdapter bluetoothAdapter;
-    private static final int ENABLE_BLUETOOTH_REQUEST = 1;
+
     private static boolean bluetoothReady = false;
     private static final String DEVICE_NAME = "HC-06";
     private BluetoothDevice device;
-    private BluetoothServer bluetoothServer;
 
     private Handler mHandler;
 
@@ -49,6 +58,7 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
     private Button btnForward;
     private Button btnBackward;
     private Button btnSpeak;
+    private Button btnSms;
 
     private ListView lstPaired;
 
@@ -59,18 +69,19 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
 
     private TextToSpeech textToSpeech;
 
-    private long[] headbandDistances;
+    private static double[] angles = {0,20,30,40,50};
+    private static final double MAX_LENGTH = 9999;
+    private byte[] headbandDistances;
     private long stickDistance;
     private long headbandBattery;
     private long stickBattery;
 
-    public long[] getHeadbandDistances() {
-        return headbandDistances;
-    }
+    private FirebaseFirestore database;
+    private FusedLocationProviderClient fusedLocationProviderClient;
 
-    public void setHeadbandDistances(long[] headbandDistances) {
-        this.headbandDistances = headbandDistances;
-    }
+    private static final int ENABLE_BLUETOOTH_REQUEST = 1;
+    private static final int LOCATION_PERMISSION_REQUEST = 2;
+    private static final int SMS_PERMISSION_REQUEST = 3;
 
     public long getStickDistance() {
         return stickDistance;
@@ -96,20 +107,32 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
         this.stickBattery = stickBattery;
     }
 
+    /*
+    Return x, y, z where z = 0
+     */
+    private static float[] polarToCartesian(double radius, double angle){
+        float[] values = new float[][3];
+        values[0] = (float) (radius*Math.cos(angle));
+        values[1] = (float) (radius*Math.sin(angle));
+        return values;
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        gvrAudioEngine = new GvrAudioEngine(this,GvrAudioEngine.RenderingMode.BINAURAL_HIGH_QUALITY);
-        gvrAudioEngine.setHeadPosition(0,0,0);
+        gvrAudioEngine = new GvrAudioEngine(this, GvrAudioEngine.RenderingMode.BINAURAL_HIGH_QUALITY);
+        gvrAudioEngine.setHeadPosition(0, 0, 0);
 
-        textToSpeech = new TextToSpeech(this,this);
+        textToSpeech = new TextToSpeech(this, this);
+
+        headbandDistances = new byte[5];
 
         btnRight = findViewById(R.id.btn_right);
         btnLeft = findViewById(R.id.btn_left);
         btnForward = findViewById(R.id.btn_forward);
         btnBackward = findViewById(R.id.btn_backward);
-
+        btnSms = findViewById(R.id.btn_sms);
         btnSpeak = findViewById(R.id.btn_speak);
         btnSpeak.setEnabled(false);
 
@@ -120,7 +143,7 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
         txtStickBattery = findViewById(R.id.txt_stick_battery);
         txtStickDistance = findViewById(R.id.txt_stick_distance);
 
-        headbandDistances = new long[8];
+
         headbandBattery = 0;
         stickDistance = 0;
         stickBattery = 0;
@@ -138,16 +161,16 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
         // set-up bluetooth connection
         bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
         bluetoothReady = bluetoothAdapter.isEnabled();
-        if (bluetoothAdapter == null){
-            Toast.makeText(this,"Device don't support bluetooth",Toast.LENGTH_LONG).show();
+        if (bluetoothAdapter == null) {
+            Toast.makeText(this, "Device don't support bluetooth", Toast.LENGTH_LONG).show();
         } else {
             // enable bluetooth
-            if (!bluetoothAdapter.isEnabled()){
+            if (!bluetoothAdapter.isEnabled()) {
                 Intent enableBluetoothIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
                 startActivityForResult(enableBluetoothIntent, ENABLE_BLUETOOTH_REQUEST);
             }
         }
-        if (bluetoothReady){
+        if (bluetoothReady) {
             onBluetoothReady();
         }
 
@@ -155,28 +178,28 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
         btnRight.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                moveSoundSource(10,0,0);
+                moveSoundSource(10, 0, 0);
             }
         });
 
         btnLeft.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                moveSoundSource(-10,0,0);
+                moveSoundSource(-10, 0, 0);
             }
         });
 
         btnForward.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                moveSoundSource(0,10,0);
+                moveSoundSource(0, 10, 0);
             }
         });
 
         btnBackward.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                moveSoundSource(0,-10,0);
+                moveSoundSource(0, -10, 0);
             }
         });
 
@@ -184,9 +207,65 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
             @Override
             public void onClick(View view) {
                 String text = "Ha ha ha";
-                textToSpeech.speak(text,TextToSpeech.QUEUE_FLUSH,null);
+                textToSpeech.speak(text, TextToSpeech.QUEUE_FLUSH, null);
             }
         });
+
+        btnSms.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                sendSMS();
+            }
+        });
+        database = FirebaseFirestore.getInstance();
+        fusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(this);
+        // setup location services
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED) {
+            saveLocation();
+        } else {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION},
+                    LOCATION_PERMISSION_REQUEST);
+        }
+
+        saveLocation();
+
+    }
+
+    private void sendSMS(){
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS)
+                == PackageManager.PERMISSION_GRANTED){
+            SmsManager smsManager = SmsManager.getDefault();
+            smsManager.sendTextMessage("+94766041559",null,"Test",null,null);
+        } else {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.SEND_SMS},
+                    SMS_PERMISSION_REQUEST);
+        }
+
+    }
+
+    private void saveLocation() {
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED) {
+            fusedLocationProviderClient.getLastLocation()
+                    .addOnSuccessListener(this, new OnSuccessListener<Location>() {
+                        @Override
+                        public void onSuccess(Location location) {
+                            // Got last known location. In some rare situations this can be null.
+                            if (location != null) {
+                                // Logic to handle location object
+                                database.collection("locations").add(location);
+                            }
+                        }
+                    });
+        } else {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION},
+                    LOCATION_PERMISSION_REQUEST);
+        }
+
     }
 
     private synchronized void onBluetoothReady(){
@@ -196,8 +275,9 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
             public void handleMessage(Message msg) {
                 switch (msg.what){
                     case BluetoothMessage.HEADBAND_DISTANCE:
-                        getHeadbandDistances()[msg.arg1] = msg.arg2;
-                        txtHeadbandReadings.setText(Arrays.toString(getHeadbandDistances()));
+                        byte[] temp =(byte[]) msg.obj;
+                        headbandDistances = temp;
+                        updateSoundPositions();
                         break;
                     case BluetoothMessage.HEADBAND_BATTERY:
                         setHeadbandBattery(msg.arg1);
@@ -224,6 +304,17 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
 
     }
 
+    private void updateSoundPositions() {
+        for (int i = 0; i < 5; i++){
+            // Todo: make sure that old sound source is removed
+            if (headbandDistances[i] > MAX_LENGTH){
+                continue;
+            }
+            float[] cordinates = polarToCartesian(headbandDistances[i],angles[i]);
+            moveSoundSource(cordinates[0],cordinates[1],cordinates[3]);
+        }
+    }
+
     public synchronized void moveSoundSource(float x, float y, float z){
         if (sourceId != GvrAudioEngine.INVALID_ID) {
             gvrAudioEngine.setSoundObjectPosition(sourceId,x,y,z);
@@ -231,11 +322,6 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
             gvrAudioEngine.update();
         }
 
-    }
-
-    private synchronized void connect(boolean secure){
-        assert device != null && bluetoothServer != null;
-        bluetoothServer.connect(device,secure);
     }
 
     @Override
@@ -312,6 +398,24 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
         return this;
     }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        switch (requestCode){
+            case LOCATION_PERMISSION_REQUEST:
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED){
+                    saveLocation();
+                }
+                break;
+            case SMS_PERMISSION_REQUEST:
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED){
+                    sendSMS();
+                }
+                break;
+            default:
+                super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        }
+    }
+
     private class ReadThread extends Thread{
         BluetoothDevice device;
         InputStream inputStream;
@@ -349,9 +453,9 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
                                 handler.obtainMessage(BluetoothMessage.HEADBAND_BATTERY,data[0]).sendToTarget();
                             } else {
                                 // headband distance message
-                                int t2 = inputStream.read(data,0,2);
-                                int distance = ((data[0] & 0xff) << 8) | (data[1] & 0xff);
-                                handler.obtainMessage(BluetoothMessage.HEADBAND_DISTANCE,header[2],distance).sendToTarget();
+                                byte[] distances = new byte[5];
+                                int t2 = inputStream.read(distances,0,5);
+                                Message.obtain(handler,BluetoothMessage.HEADBAND_DISTANCE,distances).sendToTarget();
                             }
                         } else {
                             // stick message

@@ -34,6 +34,7 @@ import com.google.vr.sdk.base.GvrActivity;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
@@ -49,16 +50,13 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
     private Handler mHandler;
 
     private GvrAudioEngine gvrAudioEngine;
-    private volatile int sourceId = GvrAudioEngine.INVALID_ID;
-    private volatile int successSourceId = GvrAudioEngine.INVALID_ID;
+    private volatile int[] sourceIds;
     private static final String SUCCESS_SOUND_FILE = "success.wav";
 
-    private Button btnRight;
-    private Button btnLeft;
-    private Button btnForward;
-    private Button btnBackward;
+    /**
+     *
+     */
     private Button btnSpeak;
-    private Button btnSms;
 
     private ListView lstPaired;
 
@@ -111,7 +109,7 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
     Return x, y, z where z = 0
      */
     private static float[] polarToCartesian(double radius, double angle){
-        float[] values = new float[][3];
+        float[] values = new float[3];
         values[0] = (float) (radius*Math.cos(angle));
         values[1] = (float) (radius*Math.sin(angle));
         return values;
@@ -123,16 +121,17 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
         setContentView(R.layout.activity_main);
         gvrAudioEngine = new GvrAudioEngine(this, GvrAudioEngine.RenderingMode.BINAURAL_HIGH_QUALITY);
         gvrAudioEngine.setHeadPosition(0, 0, 0);
-
+        sourceIds = new int[5];
+        Arrays.fill(sourceIds,GvrAudioEngine.INVALID_ID);
         textToSpeech = new TextToSpeech(this, this);
 
         headbandDistances = new byte[5];
 
-        btnRight = findViewById(R.id.btn_right);
-        btnLeft = findViewById(R.id.btn_left);
-        btnForward = findViewById(R.id.btn_forward);
-        btnBackward = findViewById(R.id.btn_backward);
-        btnSms = findViewById(R.id.btn_sms);
+        Button btnRight = findViewById(R.id.btn_right);
+        Button btnLeft = findViewById(R.id.btn_left);
+        Button btnForward = findViewById(R.id.btn_forward);
+        Button btnBackward = findViewById(R.id.btn_backward);
+        Button btnSms = findViewById(R.id.btn_sms);
         btnSpeak = findViewById(R.id.btn_speak);
         btnSpeak.setEnabled(false);
 
@@ -153,7 +152,9 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
                     @Override
                     public void run() {
                         gvrAudioEngine.preloadSoundFile(SUCCESS_SOUND_FILE);
-                        sourceId = gvrAudioEngine.createSoundObject(SUCCESS_SOUND_FILE);
+                        for (int i = 0 ; i < sourceIds.length; i++){
+                            sourceIds[i] = gvrAudioEngine.createSoundfield(SUCCESS_SOUND_FILE);
+                        }
                     }
                 }
         ).start();
@@ -178,28 +179,28 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
         btnRight.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                moveSoundSource(10, 0, 0);
+                moveSoundSource(0,10, 0, 0);
             }
         });
 
         btnLeft.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                moveSoundSource(-10, 0, 0);
+                moveSoundSource(0,-10, 0, 0);
             }
         });
 
         btnForward.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                moveSoundSource(0, 10, 0);
+                moveSoundSource(0,0, 10, 0);
             }
         });
 
         btnBackward.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                moveSoundSource(0, -10, 0);
+                moveSoundSource(0,0, -10, 0);
             }
         });
 
@@ -243,7 +244,10 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
                     new String[]{Manifest.permission.SEND_SMS},
                     SMS_PERMISSION_REQUEST);
         }
+    }
 
+    private void speak(String text){
+        textToSpeech.speak(text, TextToSpeech.QUEUE_FLUSH, null);
     }
 
     private void saveLocation() {
@@ -278,18 +282,22 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
                         byte[] temp =(byte[]) msg.obj;
                         headbandDistances = temp;
                         updateSoundPositions();
+                        txtHeadbandReadings.setText(Arrays.toString(temp));
                         break;
                     case BluetoothMessage.HEADBAND_BATTERY:
                         setHeadbandBattery(msg.arg1);
                         txtHeadbandBattery.setText(Long.toString(getHeadbandBattery()));
+                        speak("Headband battery level " + headbandBattery);
                         break;
                     case BluetoothMessage.STICK_BATTERY:
                         setStickBattery(msg.arg1);
                         txtStickBattery.setText(Long.toString(getStickBattery()));
+                        speak("Walking stick battery level " + stickBattery);
                         break;
                     case BluetoothMessage.STICK_DISTANCE:
                         setStickDistance(msg.arg1);
                         txtStickDistance.setText(Long.toString(getStickDistance()));
+                        speak(stickDistance + " meters away");
                         break;
                     default:
                         super.handleMessage(msg);
@@ -306,19 +314,18 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
 
     private void updateSoundPositions() {
         for (int i = 0; i < 5; i++){
-            // Todo: make sure that old sound source is removed
             if (headbandDistances[i] > MAX_LENGTH){
                 continue;
             }
             float[] cordinates = polarToCartesian(headbandDistances[i],angles[i]);
-            moveSoundSource(cordinates[0],cordinates[1],cordinates[3]);
+            moveSoundSource(i,cordinates[0],cordinates[1],cordinates[3]);
         }
     }
 
-    public synchronized void moveSoundSource(float x, float y, float z){
-        if (sourceId != GvrAudioEngine.INVALID_ID) {
-            gvrAudioEngine.setSoundObjectPosition(sourceId,x,y,z);
-            gvrAudioEngine.playSound(sourceId,true);
+    public synchronized void moveSoundSource(int id,float x, float y, float z){
+        if (sourceIds[id] != GvrAudioEngine.INVALID_ID) {
+            gvrAudioEngine.setSoundObjectPosition(sourceIds[id],x,y,z);
+            gvrAudioEngine.playSound(sourceIds[id],false);
             gvrAudioEngine.update();
         }
 

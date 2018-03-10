@@ -41,7 +41,7 @@ import java.util.UUID;
 
 public class MainActivity extends GvrActivity implements TextToSpeech.OnInitListener {
 
-    private static final int MIN_LENGTH = 10;
+    private static final int MIN_LENGTH = 0;
     private BluetoothAdapter bluetoothAdapter;
 
     private static boolean bluetoothReady = false;
@@ -123,31 +123,6 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
 
         headbandDistances = new byte[5];
         textToSpeech = new TextToSpeech(this, this);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         Button btnRight = findViewById(R.id.btn_right);
         Button btnLeft = findViewById(R.id.btn_left);
         Button btnForward = findViewById(R.id.btn_forward);

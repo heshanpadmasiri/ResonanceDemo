@@ -8,6 +8,8 @@ import android.bluetooth.BluetoothSocket;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -26,7 +28,6 @@ import android.widget.Toast;
 
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationServices;
-import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.vr.sdk.audio.GvrAudioEngine;
 import com.google.vr.sdk.base.GvrActivity;
@@ -75,6 +76,7 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
 
     private FirebaseFirestore database;
     private FusedLocationProviderClient fusedLocationProviderClient;
+    private LocationManager locationManager;
 
     private static final int ENABLE_BLUETOOTH_REQUEST = 1;
     private static final int LOCATION_PERMISSION_REQUEST = 2;
@@ -216,15 +218,12 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
         // setup location services
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION)
                 == PackageManager.PERMISSION_GRANTED) {
-            saveLocation();
+            enableLocationListener();
         } else {
             ActivityCompat.requestPermissions(this,
                     new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION},
                     LOCATION_PERMISSION_REQUEST);
         }
-
-        saveLocation();
-
     }
 
     private void sendSMS(){
@@ -243,20 +242,47 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
         textToSpeech.speak(text, TextToSpeech.QUEUE_FLUSH, null);
     }
 
-    private void saveLocation() {
+    private void enableLocationListener() {
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION)
                 == PackageManager.PERMISSION_GRANTED) {
-            fusedLocationProviderClient.getLastLocation()
-                    .addOnSuccessListener(this, new OnSuccessListener<Location>() {
-                        @Override
-                        public void onSuccess(Location location) {
-                            // Got last known location. In some rare situations this can be null.
-                            if (location != null) {
-                                // Logic to handle location object
-                                database.collection("locations").add(location);
-                            }
-                        }
-                    });
+
+            locationManager = this.getSystemService(LocationManager.class);
+            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 10 * 60000, 5, new LocationListener() {
+                @Override
+                public void onLocationChanged(Location location) {
+                    if (location != null) {
+                        // Logic to handle location object
+                        database.collection("locations").add(location);
+                    }
+                }
+
+                @Override
+                public void onStatusChanged(String s, int i, Bundle bundle) {
+
+                }
+
+                @Override
+                public void onProviderEnabled(String s) {
+                    speak("Location saving enabled");
+                }
+
+                @Override
+                public void onProviderDisabled(String s) {
+                    speak("Location saving disabled");
+                }
+            });
+
+//            fusedLocationProviderClient.getLastLocation()
+//                    .addOnSuccessListener(this, new OnSuccessListener<Location>() {
+//                        @Override
+//                        public void onSuccess(Location location) {
+//                            // Got last known location. In some rare situations this can be null.
+//                            if (location != null) {
+//                                // Logic to handle location object
+//                                database.collection("locations").add(location);
+//                            }
+//                        }
+//                    });
         } else {
             ActivityCompat.requestPermissions(this,
                     new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION},
@@ -434,7 +460,7 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
         switch (requestCode){
             case LOCATION_PERMISSION_REQUEST:
                 if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED){
-                    saveLocation();
+                    enableLocationListener();
                 }
                 break;
             case SMS_PERMISSION_REQUEST:

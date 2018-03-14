@@ -20,14 +20,13 @@ import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.telephony.SmsManager;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.google.android.gms.location.FusedLocationProviderClient;
-import com.google.android.gms.location.LocationServices;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.vr.sdk.audio.GvrAudioEngine;
 import com.google.vr.sdk.base.GvrActivity;
@@ -46,9 +45,12 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
     private BluetoothAdapter bluetoothAdapter;
 
     private static boolean bluetoothReady = false;
-    private static final String DEVICE_NAME = "HC-05";
-    private BluetoothDevice device;
-    private Handler mHandler;
+    private static final String HEADBAND_NAME = "HC-05";
+    private static final String WALKING_STICK_NAME = "change_here";
+    private BluetoothDevice headBand;
+    private BluetoothDevice walkingStick;
+    private Handler headbandHandler;
+    private Handler walkingStickHandler;
 
     private GvrAudioEngine gvrAudioEngine;
     private static final String SUCCESS_SOUND_FILE = "success.wav";
@@ -75,7 +77,6 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
     private long stickBattery;
 
     private FirebaseFirestore database;
-    private FusedLocationProviderClient fusedLocationProviderClient;
     private LocationManager locationManager;
 
     private static final int ENABLE_BLUETOOTH_REQUEST = 1;
@@ -120,6 +121,7 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         gvrAudioEngine = new GvrAudioEngine(this, GvrAudioEngine.RenderingMode.BINAURAL_HIGH_QUALITY);
         gvrAudioEngine.setHeadPosition(0, 0, 0);
 
@@ -214,7 +216,7 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
             }
         });
         database = FirebaseFirestore.getInstance();
-        fusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(this);
+
         // setup location services
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION)
                 == PackageManager.PERMISSION_GRANTED) {
@@ -272,17 +274,6 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
                 }
             });
 
-//            fusedLocationProviderClient.getLastLocation()
-//                    .addOnSuccessListener(this, new OnSuccessListener<Location>() {
-//                        @Override
-//                        public void onSuccess(Location location) {
-//                            // Got last known location. In some rare situations this can be null.
-//                            if (location != null) {
-//                                // Logic to handle location object
-//                                database.collection("locations").add(location);
-//                            }
-//                        }
-//                    });
         } else {
             ActivityCompat.requestPermissions(this,
                     new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION},
@@ -292,8 +283,8 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
     }
 
     private synchronized void onBluetoothReady(){
-        updatePairdDevicesList();
-        mHandler = new Handler(Looper.getMainLooper()){
+        updatePairedDevicesList();
+        headbandHandler = new Handler(Looper.getMainLooper()){
             @Override
             public void handleMessage(Message msg) {
                 switch (msg.what){
@@ -356,9 +347,22 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
                 }
             }
         };
+
+        headbandHandler = new Handler(Looper.getMainLooper()){
+            @Override
+            public void handleMessage(Message msg) {
+                switch (msg.what){
+                    case BluetoothMessage.STICK_DISTANCE:
+                        int distance = msg.arg1;
+                        speak(distance + " away");
+                        break;
+                }
+            }
+        };
+
         // Make sure the devices have been paired before
-        if (device != null){
-            ReadThread readThread = new ReadThread(device,mHandler);
+        if (headBand != null){
+            ReadThread readThread = new ReadThread(headBand, headbandHandler);
             readThread.start();
         }
 
@@ -410,14 +414,16 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
         }
     }
 
-    private void updatePairdDevicesList(){
+    private void updatePairedDevicesList(){
         Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
         ArrayList<String> deviceNames = new ArrayList<>();
         if (pairedDevices.size() > 0){
             for (BluetoothDevice device:pairedDevices){
                 String deviceName = device.getName();
-                if (deviceName.equals(DEVICE_NAME)){
-                    this.device = device;
+                if (device.getName().equals(HEADBAND_NAME)){
+                    this.headBand = device;
+                } else if (device.getName().equals(WALKING_STICK_NAME)){
+                    this.walkingStick = device;
                 }
                 deviceNames.add(deviceName);
             }
@@ -425,7 +431,7 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
             ArrayAdapter<String> adapter = new ArrayAdapter<>(this,android.R.layout.simple_list_item_1,nameArr);
             lstPaired.setAdapter(adapter);
         } else {
-            Toast.makeText(this,"No bluetooth device has been paired yet",Toast.LENGTH_LONG).show();
+            Toast.makeText(this,"No bluetooth headBand has been paired yet",Toast.LENGTH_LONG).show();
         }
     }
 
@@ -498,7 +504,6 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
         public void run() {
             if (inputStream != null){
                 byte[] header = new byte[1];
-                byte[] data = new byte[2];
                 while (true){
                     try {
                         int t1 = inputStream.read(header,0,1);
@@ -512,6 +517,11 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
                             int temp = inputStream.read(reading,0,1);
                             int irReading = reading[0]-48;
                             Message.obtain(handler,BluetoothMessage.IR_READING,irReading).sendToTarget();
+                        } else if (header[0] == 'W'){
+                            byte[] distance = new byte[1];
+                            int reading = inputStream.read(distance,0,1);
+                            reading -= 48;
+                            Message.obtain(handler,BluetoothMessage.STICK_DISTANCE,reading,0).sendToTarget();
                         }
                     } catch (IOException e) {
                         e.printStackTrace();

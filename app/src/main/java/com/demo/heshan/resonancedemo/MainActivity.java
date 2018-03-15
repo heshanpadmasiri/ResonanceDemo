@@ -46,7 +46,7 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
 
     private static boolean bluetoothReady = false;
     private static final String HEADBAND_NAME = "HC-05";
-    private static final String WALKING_STICK_NAME = "change_here";
+    private static final String WALKING_STICK_NAME = "STICK";
     private BluetoothDevice headBand;
     private BluetoothDevice walkingStick;
     private Handler headbandHandler;
@@ -311,7 +311,7 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
                     case BluetoothMessage.STICK_DISTANCE:
                         setStickDistance(msg.arg1);
                         txtStickDistance.setText(Long.toString(getStickDistance()));
-                        speak(stickDistance + " meters away");
+                        speak(stickDistance + " away");
                         break;
                     case BluetoothMessage.IR_READING:
                         System.out.println("IR message: " + (int) msg.obj);
@@ -348,22 +348,35 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
             }
         };
 
-        headbandHandler = new Handler(Looper.getMainLooper()){
+        walkingStickHandler = new Handler(Looper.getMainLooper()){
             @Override
             public void handleMessage(Message msg) {
                 switch (msg.what){
                     case BluetoothMessage.STICK_DISTANCE:
                         int distance = msg.arg1;
-                        speak(distance + " away");
+                        if (distance <= 0){
+                            speak("out of range");
+                        } else {
+                            speak(distance + "centimeters away");
+                        }
                         break;
                 }
             }
         };
 
         // Make sure the devices have been paired before
+        if (walkingStick != null){
+            ReadThread walkingStickReadThread = new ReadThread(walkingStick, walkingStickHandler);
+            walkingStickReadThread.start();
+        } else {
+            Toast.makeText(this,"walking stick not detected",Toast.LENGTH_LONG).show();
+        }
+
         if (headBand != null){
-            ReadThread readThread = new ReadThread(headBand, headbandHandler);
-            readThread.start();
+            ReadThread headBandReadThread = new ReadThread(headBand,headbandHandler);
+            headBandReadThread.start();
+        } else {
+            Toast.makeText(this,"head band not detected",Toast.LENGTH_LONG).show();
         }
 
     }
@@ -517,11 +530,11 @@ public class MainActivity extends GvrActivity implements TextToSpeech.OnInitList
                             int temp = inputStream.read(reading,0,1);
                             int irReading = reading[0]-48;
                             Message.obtain(handler,BluetoothMessage.IR_READING,irReading).sendToTarget();
-                        } else if (header[0] == 'W'){
+                        } else if (header[0] == 'D'){
                             byte[] distance = new byte[1];
                             int reading = inputStream.read(distance,0,1);
-                            reading -= 48;
-                            Message.obtain(handler,BluetoothMessage.STICK_DISTANCE,reading,0).sendToTarget();
+                            System.out.println(distance[0]);
+                            Message.obtain(handler,BluetoothMessage.STICK_DISTANCE,distance[0],0).sendToTarget();
                         }
                     } catch (IOException e) {
                         e.printStackTrace();
